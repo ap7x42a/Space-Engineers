@@ -1,0 +1,66 @@
+public Program()
+{
+    // Run every 10 ticks (about every 0.1667 seconds).
+    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+}
+
+public void Main(string argument, UpdateType updateSource)
+{
+    // Grab all blocks across connected subgrids.
+    List<IMyTerminalBlock> allBlocks = new List<IMyTerminalBlock>();
+    GridTerminalSystem.GetBlocks(allBlocks);
+
+    // Filter out battery blocks by TypeIdString.
+    List<IMyTerminalBlock> batteryBlocks = new List<IMyTerminalBlock>();
+    foreach (var block in allBlocks)
+    {
+        if (block.BlockDefinition.TypeIdString == "MyObjectBuilder_BatteryBlock")
+        {
+            batteryBlocks.Add(block);
+        }
+    }
+
+    // We'll store them by mode.
+    List<IMyBatteryBlock> autoBatteries      = new List<IMyBatteryBlock>();
+    List<IMyBatteryBlock> rechargeBatteries  = new List<IMyBatteryBlock>();
+    List<IMyBatteryBlock> dischargeBatteries = new List<IMyBatteryBlock>();
+
+    // Sort each battery into the correct list.
+    foreach (var block in batteryBlocks)
+    {
+        IMyBatteryBlock battery = block as IMyBatteryBlock;
+        if (battery == null) continue; // Just in case the cast fails on older versions.
+        
+        switch (battery.ChargeMode)
+        {
+            case ChargeMode.Auto:
+                autoBatteries.Add(battery);
+                break;
+            case ChargeMode.Recharge:
+                rechargeBatteries.Add(battery);
+                break;
+            case ChargeMode.Discharge:
+                dischargeBatteries.Add(battery);
+                break;
+        }
+    }
+
+    // Print out results:
+    Echo("=== BATTERIES IN AUTO MODE ===");
+    if (autoBatteries.Count == 0)
+        Echo("  None found");
+    else
+        foreach (var b in autoBatteries) Echo("  " + b.CustomName);
+
+    Echo("\n=== BATTERIES IN RECHARGE MODE ===");
+    if (rechargeBatteries.Count == 0)
+        Echo("  None found");
+    else
+        foreach (var b in rechargeBatteries) Echo("  " + b.CustomName);
+
+    Echo("\n=== BATTERIES IN DISCHARGE MODE ===");
+    if (dischargeBatteries.Count == 0)
+        Echo("  None found");
+    else
+        foreach (var b in dischargeBatteries) Echo("  " + b.CustomName);
+}
