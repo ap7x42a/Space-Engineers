@@ -1,950 +1,290 @@
 //////////////////////////////////////////////////////////////
-//  Adaptive Turret System v2.0                            //
-//  - Intelligent multi-mode operation with prediction     //
-//  - Advanced threat assessment and targeting             //
-//  - Smart power management and combat analytics          //
-//  - Performance optimized with caching and state machine //
+//  Adaptive Turret System                                 //
+//  - Multi-mode operation with dynamic grid detection     //
+//  - Hovercat, AssaultCat, Transfer, Turret, Crane modes  //
+//  - Real-time physics and system monitoring              //
+//  - Graceful handling of grid attach/detach events       //
 //////////////////////////////////////////////////////////////
 
-// ----------------- CONFIGURATION -----------------
-const string COCKPIT_NAME = "Turret Control Seat";
-const string BATTERY_NAME = "Turret Battery";
-const string GANTRY_CRANE_ROTOR_NAME = "Gantry Crane Main Mount Rotor";
-const string NECK_ROTOR_NAME = "Neck Rotor";
-const string ARENA_ROTOR_NAME = "Arena Rotor";
-const string GUN_DOORS_GROUP_NAME = "Gun Doors";
+// ----------------- DISPLAY CONFIG -----------------
+string CockpitName = "Turret Control Seat";
 
-// Performance settings
-const int BLOCK_UPDATE_INTERVAL = 60; // Update blocks every 60 ticks (1 second)
-const int DISPLAY_UPDATE_INTERVAL = 10; // Update displays every 10 ticks
-const int THREAT_SCAN_INTERVAL = 30; // Scan for threats every 30 ticks
-const int ANALYTICS_SAVE_INTERVAL = 600; // Save analytics every 10 seconds
+// ----------------- BLOCK NAMES -----------------
+string BatteryName = "Turret Battery";
+string GantryCraneRotorName = "Gantry Crane Main Mount Rotor";
+string NeckRotorName = "Neck Rotor";
+string ArenaRotorName = "Arena Rotor";
 
-// Combat settings
-const float MAX_TARGETING_RANGE = 800f; // Maximum engagement range
-const float PREDICTION_TIME_AHEAD = 0.5f; // Predict 0.5 seconds ahead
-const float MIN_THREAT_LEVEL = 0.3f; // Minimum threat level to engage
-const int POSITION_HISTORY_SIZE = 10; // Number of positions to track for prediction
-
-// Physics constants
-const float GAME_TICK_RATE = 60f; // Space Engineers runs at 60 UPS
-const float TRANSFER_MODE_TORQUE = 33600000f;
-const float TRANSFER_MODE_VELOCITY = -2f;
-
-// Visual settings
-const float STATUS_FONT_SIZE = 0.5f;
-const float STATUS_LINE_SPACING = 15f;
-static readonly Vector2 STATUS_START_POSITION = new Vector2(10, 45);
-
-// Colors
-static readonly Color DANGER_COLOR = Color.Red;
-static readonly Color SUCCESS_COLOR = Color.Green;
-static readonly Color ALERT_COLOR = Color.Orange;
-static readonly Color WARNING_COLOR = Color.Yellow;
-static readonly Color STANDBY_COLOR = Color.LightBlue;
-static readonly Color PINK_COLOR = Color.Pink;
-static readonly Color GRAY_COLOR = Color.Gray;
-
-// Block name arrays
-readonly string[] GATLING_GUN_NAMES = {
+string[] GatlingGunNames = {
     "Warfare Gatling Gun",
     "Warfare Gatling Gun 10", 
     "Warfare Gatling Gun 6",
     "Warfare Gatling Gun 9"
 };
 
-readonly string[] TURRET_LIGHT_NAMES = {
+string[] TurretLightNames = {
     "Turret Light Panel",
     "Turret Light Panel",
     "Turret Light Panel"
 };
 
-readonly string[] TURRET_HINGE_NAMES = {
+string[] TurretHingeNames = {
     "Turret Guns Hinge R1",
     "Turret Guns Hinge R2",
     "Turret Guns Hinge L1",
     "Turret Guns Hinge L2"
 };
 
-readonly string[] TURRET_GYRO_NAMES = {
+string[] TurretGyroNames = {
     "Turret Gyroscope 1",
     "Turret Gyroscope 2", 
     "Turret Gyroscope 3"
 };
 
-// ----------------- INTELLIGENT SYSTEMS -----------------
+string GunDoorsGroupName = "Gun Doors";
 
-// Target prediction system
-public class TargetPredictor
-{
-    private Queue<Vector3D> positionHistory = new Queue<Vector3D>();
-    private Queue<DateTime> timeHistory = new Queue<DateTime>();
-    private Vector3D lastVelocity = Vector3D.Zero;
-    private Vector3D acceleration = Vector3D.Zero;
-    
-    public void AddPosition(Vector3D position)
-    {
-        positionHistory.Enqueue(position);
-        timeHistory.Enqueue(DateTime.Now);
-        
-        if (positionHistory.Count > POSITION_HISTORY_SIZE)
-        {
-            positionHistory.Dequeue();
-            timeHistory.Dequeue();
-        }
-        
-        CalculateMotionVectors();
-    }
-    
-    private void CalculateMotionVectors()
-    {
-        if (positionHistory.Count < 2) return;
-        
-        var positions = positionHistory.ToArray();
-        var times = timeHistory.ToArray();
-        
-        // Calculate velocity
-        Vector3D currentVelocity = (positions[positions.Length - 1] - positions[positions.Length - 2]) * GAME_TICK_RATE;
-        
-        // Calculate acceleration
-        if (lastVelocity != Vector3D.Zero)
-        {
-            acceleration = (currentVelocity - lastVelocity) * GAME_TICK_RATE;
-        }
-        
-        lastVelocity = currentVelocity;
-    }
-    
-    public Vector3D PredictPosition(float timeAhead)
-    {
-        if (positionHistory.Count == 0) return Vector3D.Zero;
-        
-        var currentPos = positionHistory.Last();
-        var predictedPos = currentPos + (lastVelocity * timeAhead) + (0.5 * acceleration * timeAhead * timeAhead);
-        
-        return predictedPos;
-    }
-    
-    public Vector3D GetVelocity() => lastVelocity;
-    public Vector3D GetAcceleration() => acceleration;
-    public void Reset()
-    {
-        positionHistory.Clear();
-        timeHistory.Clear();
-        lastVelocity = Vector3D.Zero;
-        acceleration = Vector3D.Zero;
-    }
-}
+// ----------------- VISUAL CONFIG -----------------
+float StatusFontSize = 0.5f;
+float StatusLineSpacing = 15f;
+Vector2 StatusStartPosition = new Vector2(10, 45);
 
-// Threat assessment system
-public class ThreatAnalyzer
-{
-    public class ThreatInfo
-    {
-        public IMyCubeGrid Grid { get; set; }
-        public float ThreatLevel { get; set; }
-        public float Distance { get; set; }
-        public Vector3D Position { get; set; }
-        public Vector3D Velocity { get; set; }
-        public int WeaponCount { get; set; }
-        public float Size { get; set; }
-        public DateTime LastUpdated { get; set; }
-    }
-    
-    private Dictionary<long, ThreatInfo> threats = new Dictionary<long, ThreatInfo>();
-    private Dictionary<long, TargetPredictor> predictors = new Dictionary<long, TargetPredictor>();
-    
-    public void UpdateThreat(IMyCubeGrid grid, Vector3D myPosition)
-    {
-        if (grid == null) return;
-        
-        var gridId = grid.EntityId;
-        var position = grid.GetPosition();
-        var distance = (float)(position - myPosition).Length();
-        
-        if (!threats.ContainsKey(gridId))
-        {
-            threats[gridId] = new ThreatInfo { Grid = grid };
-            predictors[gridId] = new TargetPredictor();
-        }
-        
-        var threat = threats[gridId];
-        var predictor = predictors[gridId];
-        
-        predictor.AddPosition(position);
-        
-        // Update threat info
-        threat.Position = position;
-        threat.Distance = distance;
-        threat.Velocity = predictor.GetVelocity();
-        threat.Size = grid.LocalAABB.Size.Length();
-        threat.LastUpdated = DateTime.Now;
-        
-        // Calculate threat level (0-1)
-        float distanceFactor = Math.Max(0, 1 - (distance / MAX_TARGETING_RANGE));
-        float sizeFactor = Math.Min(1, threat.Size / 100f);
-        float velocityFactor = Math.Min(1, (float)threat.Velocity.Length() / 100f);
-        
-        threat.ThreatLevel = (distanceFactor * 0.5f) + (sizeFactor * 0.3f) + (velocityFactor * 0.2f);
-    }
-    
-    public ThreatInfo GetHighestThreat()
-    {
-        CleanupOldThreats();
-        return threats.Values.OrderByDescending(t => t.ThreatLevel).FirstOrDefault();
-    }
-    
-    public List<ThreatInfo> GetThreatsInRange(float range)
-    {
-        CleanupOldThreats();
-        return threats.Values.Where(t => t.Distance <= range && t.ThreatLevel >= MIN_THREAT_LEVEL)
-                             .OrderByDescending(t => t.ThreatLevel)
-                             .ToList();
-    }
-    
-    public Vector3D PredictTargetPosition(long gridId, float timeAhead)
-    {
-        if (predictors.ContainsKey(gridId))
-        {
-            return predictors[gridId].PredictPosition(timeAhead);
-        }
-        return Vector3D.Zero;
-    }
-    
-    private void CleanupOldThreats()
-    {
-        var cutoffTime = DateTime.Now.AddSeconds(-5);
-        var oldThreats = threats.Where(kvp => kvp.Value.LastUpdated < cutoffTime).Select(kvp => kvp.Key).ToList();
-        
-        foreach (var id in oldThreats)
-        {
-            threats.Remove(id);
-            predictors.Remove(id);
-        }
-    }
-    
-    public void Reset()
-    {
-        threats.Clear();
-        predictors.Clear();
-    }
-}
+// Colors
+Color DangerColor = Color.Red;
+Color SuccessColor = Color.Green;
+Color AlertColor = Color.Orange;
+Color WarningColor = Color.Yellow;
+Color StandbyColor = Color.LightBlue;
+Color PinkColor = Color.Pink;
+Color GrayColor = Color.Gray;
 
-// Combat analytics system
-public class CombatAnalytics
-{
-    public int ShotsFired { get; private set; }
-    public int TargetsEngaged { get; private set; }
-    public int ModeChanges { get; private set; }
-    public float TotalDamageDealt { get; private set; }
-    public float AverageEngagementRange { get; private set; }
-    public Dictionary<string, int> ModeUsage { get; private set; } = new Dictionary<string, int>();
-    public DateTime SessionStart { get; private set; }
-    
-    private List<float> engagementRanges = new List<float>();
-    private Program program;
-    
-    public CombatAnalytics(Program p)
-    {
-        program = p;
-        SessionStart = DateTime.Now;
-        LoadFromCustomData();
-    }
-    
-    public void RecordShot() => ShotsFired++;
-    public void RecordTargetEngaged() => TargetsEngaged++;
-    public void RecordModeChange(string mode)
-    {
-        ModeChanges++;
-        if (!ModeUsage.ContainsKey(mode))
-            ModeUsage[mode] = 0;
-        ModeUsage[mode]++;
-    }
-    
-    public void RecordEngagement(float range)
-    {
-        engagementRanges.Add(range);
-        if (engagementRanges.Count > 100) // Keep last 100 engagements
-            engagementRanges.RemoveAt(0);
-        
-        AverageEngagementRange = engagementRanges.Count > 0 ? engagementRanges.Average() : 0;
-    }
-    
-    public void SaveToCustomData()
-    {
-        var data = $"Shots:{ShotsFired}|Targets:{TargetsEngaged}|Modes:{ModeChanges}|AvgRange:{AverageEngagementRange:F1}";
-        program.Me.CustomData = data;
-    }
-    
-    private void LoadFromCustomData()
-    {
-        try
-        {
-            var data = program.Me.CustomData;
-            if (string.IsNullOrEmpty(data)) return;
-            
-            var parts = data.Split('|');
-            foreach (var part in parts)
-            {
-                var kvp = part.Split(':');
-                if (kvp.Length != 2) continue;
-                
-                switch (kvp[0])
-                {
-                    case "Shots":
-                        int.TryParse(kvp[1], out int shots);
-                        ShotsFired = shots;
-                        break;
-                    case "Targets":
-                        int.TryParse(kvp[1], out int targets);
-                        TargetsEngaged = targets;
-                        break;
-                    case "Modes":
-                        int.TryParse(kvp[1], out int modes);
-                        ModeChanges = modes;
-                        break;
-                    case "AvgRange":
-                        float.TryParse(kvp[1], out float range);
-                        AverageEngagementRange = range;
-                        break;
-                }
-            }
-        }
-        catch { /* Ignore parse errors */ }
-    }
-}
-
-// Smart power management
-public class PowerManager
-{
-    private IMyBatteryBlock battery;
-    private float lastBatteryLevel = 1.0f;
-    private bool lowPowerMode = false;
-    private Program program;
-    
-    public PowerManager(Program p)
-    {
-        program = p;
-    }
-    
-    public void UpdateBattery(IMyBatteryBlock bat)
-    {
-        battery = bat;
-    }
-    
-    public bool IsLowPower() => lowPowerMode;
-    
-    public void ManagePower(List<IMyUserControllableGun> guns, List<IMyLightingBlock> lights, List<IMyGyro> gyros)
-    {
-        if (battery == null) return;
-        
-        float currentLevel = battery.CurrentStoredPower / battery.MaxStoredPower;
-        float drainRate = lastBatteryLevel - currentLevel;
-        lastBatteryLevel = currentLevel;
-        
-        // Enter low power mode below 20%
-        if (currentLevel < 0.2f && !lowPowerMode)
-        {
-            lowPowerMode = true;
-            program.Echo("WARNING: Low power mode activated");
-            
-            // Disable non-critical systems
-            foreach (var light in lights)
-            {
-                if (light != null) light.Enabled = false;
-            }
-        }
-        else if (currentLevel > 0.4f && lowPowerMode)
-        {
-            lowPowerMode = false;
-            program.Echo("Power restored - normal operation resumed");
-            
-            // Re-enable systems
-            foreach (var light in lights)
-            {
-                if (light != null) light.Enabled = true;
-            }
-        }
-        
-        // Predictive charging - if high drain rate, pre-charge weapons
-        if (drainRate > 0.01f && currentLevel < 0.5f)
-        {
-            battery.ChargeMode = ChargeMode.Recharge;
-        }
-        else if (currentLevel > 0.9f)
-        {
-            battery.ChargeMode = ChargeMode.Auto;
-        }
-    }
-}
-
-// ----------------- MODE MANAGEMENT -----------------
-
-public interface ITurretMode
-{
-    string Name { get; }
-    void Enter();
-    void Update();
-    void Exit();
-    void Draw(MySpriteDrawFrame frame, Vector2 center);
-}
-
-public class TransferMode : ITurretMode
-{
-    public string Name => "TRANSFER MODE";
-    private Program program;
-    
-    public TransferMode(Program p) { program = p; }
-    
-    public void Enter()
-    {
-        program.ConfigureForTransfer();
-    }
-    
-    public void Update() { }
-    
-    public void Exit()
-    {
-        program.RestoreFromTransfer();
-    }
-    
-    public void Draw(MySpriteDrawFrame frame, Vector2 center)
-    {
-        var modeText = MySprite.CreateText(Name, "Monospace", GRAY_COLOR, 0.8f);
-        modeText.Position = center + new Vector2(0, -30);
-        modeText.Alignment = TextAlignment.CENTER;
-        frame.Add(modeText);
-    }
-}
-
-public class HovercatMode : ITurretMode
-{
-    public string Name => "HOVERCAT MODE";
-    private Program program;
-    
-    public HovercatMode(Program p) { program = p; }
-    
-    public void Enter()
-    {
-        program.SetGunsEnabled(false);
-        program.SetGyrosEnabled(true);
-    }
-    
-    public void Update()
-    {
-        program.UpdatePhysicsTracking();
-    }
-    
-    public void Exit() { }
-    
-    public void Draw(MySpriteDrawFrame frame, Vector2 center)
-    {
-        var modeText = MySprite.CreateText(Name, "Monospace", PINK_COLOR, 0.8f);
-        modeText.Position = center + new Vector2(0, -30);
-        modeText.Alignment = TextAlignment.CENTER;
-        frame.Add(modeText);
-        
-        var statusText = MySprite.CreateText("DEFENSIVE MODE", "Monospace", SUCCESS_COLOR, 0.6f);
-        statusText.Position = center;
-        statusText.Alignment = TextAlignment.CENTER;
-        frame.Add(statusText);
-    }
-}
-
-public class AssaultCatMode : ITurretMode
-{
-    public string Name => "ASSAULTCAT MODE";
-    private Program program;
-    
-    public AssaultCatMode(Program p) { program = p; }
-    
-    public void Enter()
-    {
-        program.SetGunsEnabled(true);
-        program.SetGyrosEnabled(true);
-        program.analytics.RecordModeChange(Name);
-    }
-    
-    public void Update()
-    {
-        program.UpdatePhysicsTracking();
-        program.UpdateTargeting();
-    }
-    
-    public void Exit() { }
-    
-    public void Draw(MySpriteDrawFrame frame, Vector2 center)
-    {
-        var modeText = MySprite.CreateText(Name, "Monospace", DANGER_COLOR, 0.8f);
-        modeText.Position = center + new Vector2(0, -40);
-        modeText.Alignment = TextAlignment.CENTER;
-        frame.Add(modeText);
-        
-        var threat = program.threatAnalyzer.GetHighestThreat();
-        string threatStatus = threat != null ? $"THREAT: {threat.ThreatLevel:F1} @ {threat.Distance:F0}m" : "NO THREATS";
-        var threatColor = threat != null ? DANGER_COLOR : SUCCESS_COLOR;
-        
-        var threatText = MySprite.CreateText(threatStatus, "Monospace", threatColor, 0.6f);
-        threatText.Position = center + new Vector2(0, -10);
-        threatText.Alignment = TextAlignment.CENTER;
-        frame.Add(threatText);
-    }
-}
-
-public class TurretMode : ITurretMode
-{
-    public string Name => "TURRET MODE";
-    private Program program;
-    
-    public TurretMode(Program p) { program = p; }
-    
-    public void Enter()
-    {
-        program.analytics.RecordModeChange(Name);
-    }
-    
-    public void Update()
-    {
-        program.UpdateTargeting();
-        program.TrackFiring();
-    }
-    
-    public void Exit() { }
-    
-    public void Draw(MySpriteDrawFrame frame, Vector2 center)
-    {
-        var modeText = MySprite.CreateText(Name, "Monospace", DANGER_COLOR, 0.8f);
-        modeText.Position = center + new Vector2(0, -30);
-        modeText.Alignment = TextAlignment.CENTER;
-        frame.Add(modeText);
-        
-        string subModeText = program.AreGunsFiring() ? "FIRING" : (program.AreGunsOnline() ? "ARMED" : "SAFE");
-        Color subModeColor = program.AreGunsFiring() ? DANGER_COLOR : (program.AreGunsOnline() ? ALERT_COLOR : SUCCESS_COLOR);
-        
-        var subModeSprite = MySprite.CreateText(subModeText, "Monospace", subModeColor, 0.6f);
-        subModeSprite.Position = center;
-        subModeSprite.Alignment = TextAlignment.CENTER;
-        frame.Add(subModeSprite);
-        
-        // Show analytics
-        var analyticsText = $"Shots: {program.analytics.ShotsFired} | Targets: {program.analytics.TargetsEngaged}";
-        var analyticsSprite = MySprite.CreateText(analyticsText, "Monospace", Color.White, 0.4f);
-        analyticsSprite.Position = center + new Vector2(0, 30);
-        analyticsSprite.Alignment = TextAlignment.CENTER;
-        frame.Add(analyticsSprite);
-    }
-}
-
-public class CraneMode : ITurretMode
-{
-    public string Name => "CRANE MODE";
-    private Program program;
-    
-    public CraneMode(Program p) { program = p; }
-    
-    public void Enter()
-    {
-        program.SetGunsEnabled(false);
-    }
-    
-    public void Update() { }
-    
-    public void Exit() { }
-    
-    public void Draw(MySpriteDrawFrame frame, Vector2 center)
-    {
-        var modeText = MySprite.CreateText(Name, "Monospace", WARNING_COLOR, 0.8f);
-        modeText.Position = center + new Vector2(0, -30);
-        modeText.Alignment = TextAlignment.CENTER;
-        frame.Add(modeText);
-        
-        var statusText = MySprite.CreateText("SYSTEM READY", "Monospace", SUCCESS_COLOR, 0.6f);
-        statusText.Position = center;
-        statusText.Alignment = TextAlignment.CENTER;
-        frame.Add(statusText);
-    }
-}
-
-// ----------------- MAIN PROGRAM -----------------
-
-// System state
+// ----------------- SYSTEM STATE -----------------
 bool systemActive = false;
+bool transferModeOverride = false;
 bool scriptInitialized = false;
-int tickCounter = 0;
-int lastBlockUpdate = 0;
-int lastDisplayUpdate = 0;
-int lastThreatScan = 0;
-int lastAnalyticsSave = 0;
-bool lastFiringState = false;
-DateTime lastStateChange = DateTime.Now;
 
-// Intelligent systems
-ThreatAnalyzer threatAnalyzer;
-CombatAnalytics analytics;
-PowerManager powerManager;
-ITurretMode currentMode;
-Dictionary<string, ITurretMode> modes;
-
-// Block cache
-class BlockCache
-{
-    public IMyCockpit Cockpit;
-    public IMyBatteryBlock Battery;
-    public IMyMotorStator GantryCraneRotor;
-    public IMyMotorStator NeckRotor;
-    public IMyMotorStator ArenaRotor;
-    public List<IMyUserControllableGun> GatlingGuns = new List<IMyUserControllableGun>();
-    public List<IMyLightingBlock> TurretLights = new List<IMyLightingBlock>();
-    public List<IMyMotorStator> TurretHinges = new List<IMyMotorStator>();
-    public List<IMyGyro> TurretGyros = new List<IMyGyro>();
-    public List<IMyGyro> AllSmallGridGyros = new List<IMyGyro>();
-    public List<IMyThrust> AllSmallGridThrusters = new List<IMyThrust>();
-    public IMyBlockGroup GunDoorsGroup;
-    public Dictionary<string, IMyTextSurface> Displays = new Dictionary<string, IMyTextSurface>();
-    public bool NeedsUpdate = true;
-}
-
-BlockCache blockCache = new BlockCache();
+// Block references
+Dictionary<string, IMyTextSurface> displays = new Dictionary<string, IMyTextSurface>();
+IMyCockpit cockpit = null;
+IMyBatteryBlock turretBattery = null;
+IMyMotorStator gantryCraneRotor = null;
+IMyMotorStator neckRotor = null;
+IMyMotorStator arenaRotor = null;
+List<IMyUserControllableGun> gatlingGuns = new List<IMyUserControllableGun>();
+List<IMyLightingBlock> turretLights = new List<IMyLightingBlock>();
+List<IMyMotorStator> turretHinges = new List<IMyMotorStator>();
+List<IMyGyro> turretGyros = new List<IMyGyro>();
+List<IMyGyro> allSmallGridGyros = new List<IMyGyro>();
+List<IMyThrust> allSmallGridThrusters = new List<IMyThrust>();
+IMyBlockGroup gunDoorsGroup = null;
 
 // Physics tracking
 Vector3D lastPosition = Vector3D.Zero;
 Vector3D velocity = Vector3D.Zero;
 bool physicsInitialized = false;
 
-// Saved settings
-Dictionary<string, string> savedSettings = new Dictionary<string, string>();
-
-public Program()
-{
-    Runtime.UpdateFrequency = UpdateFrequency.Update1;
-    
-    // Initialize intelligent systems
-    threatAnalyzer = new ThreatAnalyzer();
-    analytics = new CombatAnalytics(this);
-    powerManager = new PowerManager(this);
-    
-    // Initialize modes
-    modes = new Dictionary<string, ITurretMode>
-    {
-        ["TRANSFER"] = new TransferMode(this),
-        ["HOVERCAT"] = new HovercatMode(this),
-        ["ASSAULTCAT"] = new AssaultCatMode(this),
-        ["TURRET"] = new TurretMode(this),
-        ["CRANE"] = new CraneMode(this)
-    };
-    
-    Echo("Adaptive Turret System v2.0 initialized");
-}
-
+// ----------------- MAIN FUNCTION -----------------
 void Main(string argument, UpdateType updateSource)
 {
-    try
+    // Initialize script on first run
+    if (!scriptInitialized)
     {
-        tickCounter++;
-        
-        // Handle commands
-        if (!string.IsNullOrEmpty(argument))
-        {
-            ProcessCommand(argument.ToLower());
-            return;
-        }
-        
-        if (!systemActive)
-        {
-            if (tickCounter % DISPLAY_UPDATE_INTERVAL == 0)
-            {
-                ClearAllDisplays();
-            }
-            Echo("System inactive");
-            return;
-        }
-        
-        // Periodic updates
-        if (tickCounter - lastBlockUpdate >= BLOCK_UPDATE_INTERVAL)
-        {
-            UpdateBlockReferences();
-            lastBlockUpdate = tickCounter;
-        }
-        
-        if (tickCounter - lastThreatScan >= THREAT_SCAN_INTERVAL)
-        {
-            ScanForThreats();
-            lastThreatScan = tickCounter;
-        }
-        
-        if (tickCounter - lastAnalyticsSave >= ANALYTICS_SAVE_INTERVAL)
-        {
-            analytics.SaveToCustomData();
-            lastAnalyticsSave = tickCounter;
-        }
-        
-        // Mode management
-        UpdateMode();
-        
-        if (currentMode != null)
-        {
-            currentMode.Update();
-        }
-        
-        // Power management
-        powerManager.ManagePower(blockCache.GatlingGuns, blockCache.TurretLights, blockCache.AllSmallGridGyros);
-        
-        // Display updates
-        if (tickCounter - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL)
-        {
-            UpdateDisplays();
-            lastDisplayUpdate = tickCounter;
-        }
-        
-        UpdateStatus();
+        Runtime.UpdateFrequency = UpdateFrequency.Update10; // Run every 10 ticks
+        Echo("Script initializing...");
+        UpdateBlockReferences(); // Initialize all blocks immediately
+        scriptInitialized = true;
     }
-    catch (Exception e)
+    
+    // Handle commands
+    if ((updateSource & (UpdateType.Terminal | UpdateType.Trigger)) != 0)
     {
-        Echo($"ERROR: {e.Message}");
-        Echo($"Stack: {e.StackTrace}");
-    }
-}
-
-void ProcessCommand(string command)
-{
-    switch (command)
-    {
-        case "on":
+        Echo($"Received command: '{argument}'");
+        
+        if (argument.ToLower() == "on")
+        {
             systemActive = true;
-            blockCache.NeedsUpdate = true;
+            transferModeOverride = false;
             Echo("System activated");
-            break;
-            
-        case "off":
+            return;
+        }
+        
+        if (argument.ToLower() == "off")
+        {
             systemActive = false;
-            if (currentMode != null)
-            {
-                currentMode.Exit();
-                currentMode = null;
-            }
+            transferModeOverride = false;
             ClearAllDisplays();
             Echo("System deactivated");
-            break;
-            
-        case "transfer":
-            ChangeMode("TRANSFER");
-            break;
-            
-        case "stop_transfer":
-            if (currentMode?.Name == "TRANSFER MODE")
-            {
-                currentMode.Exit();
-                UpdateMode();
-            }
-            break;
-            
-        case "reset":
-            threatAnalyzer.Reset();
-            analytics = new CombatAnalytics(this);
-            Echo("Systems reset");
-            break;
-            
-        default:
-            Echo($"Unknown command: {command}");
-            break;
+            return;
+        }
+        
+        if (argument.ToLower() == "transfer")
+        {
+            HandleTransferMode();
+            return;
+        }
+        
+        if (argument.ToLower() == "stop_transfer")
+        {
+            HandleStopTransferMode();
+            return;
+        }
     }
+    
+    if (systemActive)
+    {
+        Echo("Running active update cycle...");
+        UpdateBlockReferences();
+        UpdatePhysics();
+        UpdateDisplays();
+    }
+    else
+    {
+        // Keep displays black when system is off
+        if (displays.Count > 0)
+        {
+            ClearAllDisplays();
+        }
+        Echo("System inactive - displays cleared");
+    }
+    
+    UpdateStatus();
 }
 
-void UpdateMode()
-{
-    string detectedMode = DetectMode();
-    
-    if (currentMode == null || currentMode.Name != detectedMode)
-    {
-        ChangeMode(detectedMode);
-    }
-}
-
-string DetectMode()
-{
-    if (blockCache.GantryCraneRotor?.IsAttached == true)
-        return "CRANE";
-    
-    if (blockCache.ArenaRotor?.IsAttached == true)
-        return "TURRET";
-    
-    if (blockCache.NeckRotor?.IsAttached == true)
-    {
-        bool allGunsOn = blockCache.GatlingGuns.Count > 0 && 
-                        blockCache.GatlingGuns.All(gun => gun?.Enabled == true);
-        return allGunsOn ? "ASSAULTCAT" : "HOVERCAT";
-    }
-    
-    return "TRANSFER";
-}
-
-void ChangeMode(string modeName)
-{
-    if (currentMode != null)
-    {
-        currentMode.Exit();
-    }
-    
-    if (modes.ContainsKey(modeName))
-    {
-        currentMode = modes[modeName];
-        currentMode.Enter();
-        analytics.RecordModeChange(modeName);
-        lastStateChange = DateTime.Now;
-        Echo($"Mode changed to: {modeName}");
-    }
-}
-
+// ----------------- INITIALIZATION -----------------
 void UpdateBlockReferences()
 {
-    if (!blockCache.NeedsUpdate && tickCounter > 60) return;
+    Echo("Updating block references...");
     
-    try
+    // Initialize displays
+    if (displays.Count == 0)
     {
-        // Update cockpit and displays
-        if (blockCache.Cockpit == null)
-        {
-            blockCache.Cockpit = GridTerminalSystem.GetBlockWithName(COCKPIT_NAME) as IMyCockpit;
-            if (blockCache.Cockpit != null)
-            {
-                InitializeDisplays();
-            }
-        }
-        
-        // Update critical blocks
-        blockCache.Battery = GridTerminalSystem.GetBlockWithName(BATTERY_NAME) as IMyBatteryBlock;
-        blockCache.GantryCraneRotor = GridTerminalSystem.GetBlockWithName(GANTRY_CRANE_ROTOR_NAME) as IMyMotorStator;
-        blockCache.NeckRotor = GridTerminalSystem.GetBlockWithName(NECK_ROTOR_NAME) as IMyMotorStator;
-        blockCache.ArenaRotor = GridTerminalSystem.GetBlockWithName(ARENA_ROTOR_NAME) as IMyMotorStator;
-        
-        // Save Arena Rotor settings when first detected
-        if (blockCache.ArenaRotor?.IsAttached == true && !savedSettings.ContainsKey("ArenaRotor"))
-        {
-            SaveRotorSettings(blockCache.ArenaRotor, "ArenaRotor");
-        }
-        
-        // Update weapon systems
-        UpdateWeaponSystems();
-        
-        // Update support systems
-        UpdateSupportSystems();
-        
-        // Update power manager
-        powerManager.UpdateBattery(blockCache.Battery);
-        
-        blockCache.NeedsUpdate = false;
-        
-        Echo($"Blocks updated: {blockCache.GatlingGuns.Count} guns, {blockCache.AllSmallGridGyros.Count} gyros");
+        InitializeDisplays();
     }
-    catch (Exception e)
+    
+    // Update block references (graceful handling for attach/detach)
+    cockpit = GridTerminalSystem.GetBlockWithName(CockpitName) as IMyCockpit;
+    turretBattery = GridTerminalSystem.GetBlockWithName(BatteryName) as IMyBatteryBlock;
+    gantryCraneRotor = GridTerminalSystem.GetBlockWithName(GantryCraneRotorName) as IMyMotorStator;
+    neckRotor = GridTerminalSystem.GetBlockWithName(NeckRotorName) as IMyMotorStator;
+    arenaRotor = GridTerminalSystem.GetBlockWithName(ArenaRotorName) as IMyMotorStator;
+    
+    // Save Arena Rotor settings when first detected
+    if (arenaRotor != null && arenaRotor.IsAttached)
     {
-        Echo($"Block update error: {e.Message}");
+        SaveArenaRotorSettings();
     }
-}
-
-void UpdateWeaponSystems()
-{
-    blockCache.GatlingGuns.Clear();
-    foreach (var gunName in GATLING_GUN_NAMES)
+    
+    Echo($"Key blocks: Cockpit={cockpit != null}, Battery={turretBattery != null}, Rotors={gantryCraneRotor != null}/{neckRotor != null}/{arenaRotor != null}");
+    
+    // Update gatling guns
+    gatlingGuns.Clear();
+    foreach (var gunName in GatlingGunNames)
     {
         var gun = GridTerminalSystem.GetBlockWithName(gunName) as IMyUserControllableGun;
         if (gun != null)
-            blockCache.GatlingGuns.Add(gun);
+            gatlingGuns.Add(gun);
     }
+    Echo($"Found {gatlingGuns.Count}/{GatlingGunNames.Length} gatling guns");
     
-    blockCache.TurretHinges.Clear();
-    foreach (var hingeName in TURRET_HINGE_NAMES)
-    {
-        var hinge = GridTerminalSystem.GetBlockWithName(hingeName) as IMyMotorStator;
-        if (hinge != null)
-            blockCache.TurretHinges.Add(hinge);
-    }
-    
-    blockCache.GunDoorsGroup = GridTerminalSystem.GetBlockGroupWithName(GUN_DOORS_GROUP_NAME);
-}
-
-void UpdateSupportSystems()
-{
-    blockCache.TurretLights.Clear();
-    foreach (var lightName in TURRET_LIGHT_NAMES)
+    // Update turret lights
+    turretLights.Clear();
+    foreach (var lightName in TurretLightNames)
     {
         var light = GridTerminalSystem.GetBlockWithName(lightName) as IMyLightingBlock;
         if (light != null)
-            blockCache.TurretLights.Add(light);
+            turretLights.Add(light);
+    }
+    Echo($"Found {turretLights.Count}/{TurretLightNames.Length} turret lights");
+    
+    // Update turret hinges
+    turretHinges.Clear();
+    foreach (var hingeName in TurretHingeNames)
+    {
+        var hinge = GridTerminalSystem.GetBlockWithName(hingeName) as IMyMotorStator;
+        if (hinge != null)
+            turretHinges.Add(hinge);
     }
     
-    blockCache.TurretGyros.Clear();
-    foreach (var gyroName in TURRET_GYRO_NAMES)
+    // Update turret gyros
+    turretGyros.Clear();
+    foreach (var gyroName in TurretGyroNames)
     {
         var gyro = GridTerminalSystem.GetBlockWithName(gyroName) as IMyGyro;
         if (gyro != null)
-            blockCache.TurretGyros.Add(gyro);
+            turretGyros.Add(gyro);
     }
     
-    // Update all small grid components
-    var allGyros = new List<IMyGyro>();
-    var allThrusters = new List<IMyThrust>();
+    // Update all small grid gyros and thrusters
+    UpdateSmallGridBlocks();
     
-    GridTerminalSystem.GetBlocksOfType(allGyros);
-    GridTerminalSystem.GetBlocksOfType(allThrusters);
-    
-    blockCache.AllSmallGridGyros = allGyros.Where(g => g.CubeGrid.GridSizeEnum == VRage.Game.MyCubeSize.Small).ToList();
-    blockCache.AllSmallGridThrusters = allThrusters.Where(t => t.CubeGrid.GridSizeEnum == VRage.Game.MyCubeSize.Small).ToList();
+    // Update gun doors group
+    gunDoorsGroup = GridTerminalSystem.GetBlockGroupWithName(GunDoorsGroupName);
 }
 
 void InitializeDisplays()
 {
-    if (blockCache.Cockpit == null) return;
+    displays.Clear();
+    
+    cockpit = GridTerminalSystem.GetBlockWithName(CockpitName) as IMyCockpit;
+    if (cockpit == null) 
+    {
+        Echo($"ERROR: Cockpit '{CockpitName}' not found!");
+        return;
+    }
+    
+    Echo($"Found cockpit: {cockpit.DisplayName}");
     
     try
     {
-        blockCache.Displays.Clear();
-        blockCache.Displays["TopLeft"] = blockCache.Cockpit.GetSurface(0);
-        blockCache.Displays["TopCenter"] = blockCache.Cockpit.GetSurface(1);
-        blockCache.Displays["TopRight"] = blockCache.Cockpit.GetSurface(2);
+        displays["TopLeft"] = cockpit.GetSurface(0);
+        displays["TopCenter"] = cockpit.GetSurface(1);
+        displays["TopRight"] = cockpit.GetSurface(2);
         
-        foreach (var display in blockCache.Displays.Values)
+        Echo($"Initialized {displays.Count} displays");
+        
+        foreach (var kvp in displays)
         {
+            var display = kvp.Value;
             display.ContentType = ContentType.SCRIPT;
             display.Script = "";
+            Echo($"{kvp.Key}: {display.SurfaceSize.X}x{display.SurfaceSize.Y}");
         }
-        
-        Echo($"Initialized {blockCache.Displays.Count} displays");
     }
     catch (Exception e)
     {
-        Echo($"Display init error: {e.Message}");
+        Echo($"Display initialization error: {e.Message}");
     }
 }
 
-void ScanForThreats()
+void UpdateSmallGridBlocks()
 {
-    if (blockCache.Cockpit == null) return;
+    allSmallGridGyros.Clear();
+    allSmallGridThrusters.Clear();
     
-    var myPosition = blockCache.Cockpit.GetPosition();
-    var nearbyGrids = new List<IMyCubeGrid>();
+    var gyros = new List<IMyGyro>();
+    var thrusters = new List<IMyThrust>();
     
-    // This is a simplified threat scan - in real implementation would need more sophisticated detection
-    GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(null, block =>
+    GridTerminalSystem.GetBlocksOfType(gyros);
+    GridTerminalSystem.GetBlocksOfType(thrusters);
+    
+    foreach (var gyro in gyros)
     {
-        if (block.CubeGrid != Me.CubeGrid && !nearbyGrids.Contains(block.CubeGrid))
-        {
-            nearbyGrids.Add(block.CubeGrid);
-        }
-        return false;
-    });
+        if (gyro.CubeGrid.GridSizeEnum == VRage.Game.MyCubeSize.Small)
+            allSmallGridGyros.Add(gyro);
+    }
     
-    foreach (var grid in nearbyGrids)
+    foreach (var thruster in thrusters)
     {
-        threatAnalyzer.UpdateThreat(grid, myPosition);
+        if (thruster.CubeGrid.GridSizeEnum == VRage.Game.MyCubeSize.Small)
+            allSmallGridThrusters.Add(thruster);
     }
 }
 
-public void UpdatePhysicsTracking()
+// ----------------- PHYSICS TRACKING -----------------
+void UpdatePhysics()
 {
-    if (blockCache.Cockpit == null) return;
+    if (cockpit == null) return;
     
-    var currentPosition = blockCache.Cockpit.GetPosition();
+    var currentPosition = cockpit.GetPosition();
     
     if (!physicsInitialized)
     {
@@ -953,71 +293,64 @@ public void UpdatePhysicsTracking()
         return;
     }
     
-    velocity = (currentPosition - lastPosition) * GAME_TICK_RATE;
+    velocity = (currentPosition - lastPosition) * 60; // Convert to m/s (assuming 60 UPS)
     lastPosition = currentPosition;
 }
 
-public void UpdateTargeting()
+// ----------------- MODE DETECTION -----------------
+string GetCurrentMode()
 {
-    var threat = threatAnalyzer.GetHighestThreat();
-    if (threat == null || threat.ThreatLevel < MIN_THREAT_LEVEL) return;
+    if (transferModeOverride)
+        return "TRANSFER MODE";
     
-    // Predict target position
-    var predictedPos = threatAnalyzer.PredictTargetPosition(threat.Grid.EntityId, PREDICTION_TIME_AHEAD);
+    if (gantryCraneRotor != null && gantryCraneRotor.IsAttached)
+        return "CRANE MODE";
     
-    // In a real implementation, would calculate firing solution here
-    // This would involve calculating lead angles based on projectile velocity
+    if (arenaRotor != null && arenaRotor.IsAttached)
+        return "TURRET MODE";
     
-    analytics.RecordEngagement(threat.Distance);
-}
-
-public void TrackFiring()
-{
-    bool currentlyFiring = AreGunsFiring();
-    
-    if (currentlyFiring && !lastFiringState)
+    if (neckRotor != null && neckRotor.IsAttached)
     {
-        analytics.RecordTargetEngaged();
+        bool allGunsOn = gatlingGuns.Count > 0 && gatlingGuns.All(gun => gun != null && gun.Enabled);
+        return allGunsOn ? "ASSAULTCAT MODE" : "HOVERCAT MODE";
     }
     
-    if (currentlyFiring)
-    {
-        analytics.RecordShot();
-    }
-    
-    lastFiringState = currentlyFiring;
+    return "TRANSFER MODE";
 }
 
+bool AreGunsOnline()
+{
+    return gatlingGuns.Count > 0 && gatlingGuns.Any(gun => gun != null && gun.Enabled);
+}
+
+bool AreGunsAllOnline()
+{
+    return gatlingGuns.Count > 0 && gatlingGuns.All(gun => gun != null && gun.Enabled);
+}
+
+bool AreGunsFiring()
+{
+    return gatlingGuns.Any(gun => gun != null && gun.IsShooting);
+}
+
+// ----------------- DISPLAY UPDATES -----------------
 void UpdateDisplays()
 {
     var currentTime = DateTime.Now.ToString("HH:mm:ss");
     
-    if (blockCache.Displays.ContainsKey("TopLeft"))
+    if (displays.ContainsKey("TopLeft"))
     {
-        DrawSystemStatus(blockCache.Displays["TopLeft"], currentTime);
+        DrawSystemStatus(displays["TopLeft"], currentTime);
     }
     
-    if (blockCache.Displays.ContainsKey("TopCenter") && currentMode != null)
+    if (displays.ContainsKey("TopCenter"))
     {
-        using (var frame = blockCache.Displays["TopCenter"].DrawFrame())
-        {
-            var center = blockCache.Displays["TopCenter"].SurfaceSize * 0.5f;
-            currentMode.Draw(frame, center);
-            
-            // Add power warning if needed
-            if (powerManager.IsLowPower())
-            {
-                var warningText = MySprite.CreateText("⚠ LOW POWER ⚠", "Monospace", DANGER_COLOR, 0.5f);
-                warningText.Position = center + new Vector2(0, 60);
-                warningText.Alignment = TextAlignment.CENTER;
-                frame.Add(warningText);
-            }
-        }
+        DrawMainInterface(displays["TopCenter"], currentTime);
     }
     
-    if (blockCache.Displays.ContainsKey("TopRight"))
+    if (displays.ContainsKey("TopRight"))
     {
-        DrawAnalytics(blockCache.Displays["TopRight"], currentTime);
+        DrawRightDisplay(displays["TopRight"], currentTime);
     }
 }
 
@@ -1026,101 +359,454 @@ void DrawSystemStatus(IMyTextSurface surface, string currentTime)
     using (var frame = surface.DrawFrame())
     {
         var viewport = surface.TextureSize;
-        var pos = STATUS_START_POSITION;
+        var pos = StatusStartPosition;
+        var fontSize = StatusFontSize;
         
         // Title
-        AddText(frame, "SYSTEM STATUS v2.0", pos, DANGER_COLOR, STATUS_FONT_SIZE * 1.2f);
-        pos.Y += STATUS_LINE_SPACING * 2;
+        var title = MySprite.CreateText("SYSTEM STATUS", "Monospace", DangerColor, fontSize * 1.2f);
+        title.Position = pos;
+        title.Alignment = TextAlignment.LEFT;
+        frame.Add(title);
+        pos.Y += StatusLineSpacing * 2;
         
-        // Status
-        bool batteryOn = blockCache.Battery?.Enabled == true;
-        AddStatusLine(frame, "Status:", systemActive ? "ACTIVE" : "INACTIVE", 
-                     systemActive ? SUCCESS_COLOR : DANGER_COLOR, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        // Status - Check battery state
+        bool batteryOn = turretBattery != null && turretBattery.Enabled;
+        string statusText = batteryOn ? "OPERATIONAL" : "EMERGENCY";
+        Color statusColor = batteryOn ? SuccessColor : DangerColor;
+        
+        var statusLabel = MySprite.CreateText("Status:", "Monospace", Color.White, fontSize);
+        statusLabel.Position = pos;
+        statusLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(statusLabel);
+        
+        var statusValue = MySprite.CreateText(statusText, "Monospace", statusColor, fontSize);
+        statusValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        statusValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(statusValue);
+        pos.Y += StatusLineSpacing;
         
         // Power
-        string powerText = batteryOn ? $"{(blockCache.Battery.CurrentStoredPower / blockCache.Battery.MaxStoredPower * 100):F0}%" : "OFFLINE";
-        Color powerColor = batteryOn ? (powerManager.IsLowPower() ? WARNING_COLOR : SUCCESS_COLOR) : DANGER_COLOR;
-        AddStatusLine(frame, "Power:", powerText, powerColor, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        string powerText = batteryOn ? "ONLINE" : "OFFLINE";
+        Color powerColor = batteryOn ? SuccessColor : DangerColor;
         
-        // Mode
-        string modeText = currentMode?.Name ?? "NONE";
-        AddStatusLine(frame, "Mode:", modeText, Color.White, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        var powerLabel = MySprite.CreateText("Power:", "Monospace", Color.White, fontSize);
+        powerLabel.Position = pos;
+        powerLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(powerLabel);
         
-        // Threat Level
-        var threat = threatAnalyzer.GetHighestThreat();
-        string threatText = threat != null ? $"{threat.ThreatLevel:F2}" : "CLEAR";
-        Color threatColor = threat != null ? DANGER_COLOR : SUCCESS_COLOR;
-        AddStatusLine(frame, "Threat:", threatText, threatColor, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING * 2;
+        var powerValue = MySprite.CreateText(powerText, "Monospace", powerColor, fontSize);
+        powerValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        powerValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(powerValue);
+        pos.Y += StatusLineSpacing;
+        
+        // Weapons
+        string weaponStatus = GetWeaponStatus();
+        Color weaponColor = GetWeaponStatusColor(weaponStatus);
+        
+        var weaponLabel = MySprite.CreateText("Weapons:", "Monospace", Color.White, fontSize);
+        weaponLabel.Position = pos;
+        weaponLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(weaponLabel);
+        
+        var weaponValue = MySprite.CreateText(weaponStatus, "Monospace", weaponColor, fontSize);
+        weaponValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        weaponValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(weaponValue);
+        pos.Y += StatusLineSpacing;
+        
+        // Safety
+        bool gunsOnline = AreGunsOnline();
+        string safetyText = gunsOnline ? "OVERRIDE" : "ENABLED";
+        Color safetyColor = gunsOnline ? DangerColor : SuccessColor;
+        
+        var safetyLabel = MySprite.CreateText("Safety:", "Monospace", Color.White, fontSize);
+        safetyLabel.Position = pos;
+        safetyLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(safetyLabel);
+        
+        var safetyValue = MySprite.CreateText(safetyText, "Monospace", safetyColor, fontSize);
+        safetyValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        safetyValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(safetyValue);
+        pos.Y += StatusLineSpacing * 2;
         
         // Time
-        AddStatusLine(frame, "Time:", currentTime, Color.White, pos, viewport.X);
+        var timeLabel = MySprite.CreateText("Time:", "Monospace", Color.White, fontSize);
+        timeLabel.Position = pos;
+        timeLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(timeLabel);
+        
+        var timeValue = MySprite.CreateText(currentTime, "Monospace", Color.White, fontSize);
+        timeValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        timeValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(timeValue);
     }
 }
 
-void DrawAnalytics(IMyTextSurface surface, string currentTime)
+void DrawMainInterface(IMyTextSurface surface, string currentTime)
+{
+    using (var frame = surface.DrawFrame())
+    {
+        var center = surface.SurfaceSize * 0.5f;
+        string mode = GetCurrentMode();
+        
+        switch (mode)
+        {
+            case "TRANSFER MODE":
+                DrawTransferMode(frame, center);
+                break;
+                
+            case "HOVERCAT MODE":
+                DrawHovercatMode(frame, center);
+                break;
+                
+            case "ASSAULTCAT MODE":
+                DrawAssaultcatMode(frame, center);
+                break;
+                
+            case "TURRET MODE":
+                DrawTurretMode(frame, center);
+                break;
+                
+            case "CRANE MODE":
+                DrawCraneMode(frame, center);
+                break;
+        }
+    }
+}
+
+void DrawTransferMode(MySpriteDrawFrame frame, Vector2 center)
+{
+    var modeText = MySprite.CreateText("TRANSFER MODE", "Monospace", GrayColor, 0.8f);
+    modeText.Position = center + new Vector2(0, -30);
+    modeText.Alignment = TextAlignment.CENTER;
+    frame.Add(modeText);
+}
+
+void DrawHovercatMode(MySpriteDrawFrame frame, Vector2 center)
+{
+    var modeText = MySprite.CreateText("HOVERCAT MODE", "Monospace", PinkColor, 0.8f);
+    modeText.Position = center + new Vector2(0, -30);
+    modeText.Alignment = TextAlignment.CENTER;
+    frame.Add(modeText);
+    
+    var statusText = MySprite.CreateText("DEFENSIVE MODE", "Monospace", SuccessColor, 0.6f);
+    statusText.Position = center + new Vector2(0, 0);
+    statusText.Alignment = TextAlignment.CENTER;
+    frame.Add(statusText);
+    
+    DrawPhysicsAndStatus(frame, center);
+}
+
+void DrawAssaultcatMode(MySpriteDrawFrame frame, Vector2 center)
+{
+    var modeText = MySprite.CreateText("ASSAULTCAT MODE", "Monospace", DangerColor, 0.8f);
+    modeText.Position = center + new Vector2(0, -40);
+    modeText.Alignment = TextAlignment.CENTER;
+    frame.Add(modeText);
+    
+    var tacticalText = MySprite.CreateText("TACTICAL MODE", "Monospace", GrayColor, 0.6f);
+    tacticalText.Position = center + new Vector2(0, -10);
+    tacticalText.Alignment = TextAlignment.CENTER;
+    frame.Add(tacticalText);
+    
+    DrawPhysicsAndStatus(frame, center);
+}
+
+void DrawTurretMode(MySpriteDrawFrame frame, Vector2 center)
+{
+    var modeText = MySprite.CreateText("TURRET MODE", "Monospace", DangerColor, 0.8f);
+    modeText.Position = center + new Vector2(0, -30);
+    modeText.Alignment = TextAlignment.CENTER;
+    frame.Add(modeText);
+    
+    string subModeText;
+    Color subModeColor;
+    
+    if (AreGunsFiring())
+    {
+        subModeText = "FIRING";
+        subModeColor = DangerColor;
+    }
+    else if (AreGunsOnline())
+    {
+        subModeText = "FIRING MODE";
+        subModeColor = AlertColor;
+    }
+    else
+    {
+        subModeText = "SAFETY MODE";
+        subModeColor = SuccessColor;
+    }
+    
+    var subModeSprite = MySprite.CreateText(subModeText, "Monospace", subModeColor, 0.6f);
+    subModeSprite.Position = center + new Vector2(0, 0);
+    subModeSprite.Alignment = TextAlignment.CENTER;
+    frame.Add(subModeSprite);
+    
+    DrawTurretModeStatus(frame, center);
+}
+
+void DrawCraneMode(MySpriteDrawFrame frame, Vector2 center)
+{
+    var modeText = MySprite.CreateText("CRANE MODE", "Monospace", WarningColor, 0.8f);
+    modeText.Position = center + new Vector2(0, -30);
+    modeText.Alignment = TextAlignment.CENTER;
+    frame.Add(modeText);
+    
+    var statusText = MySprite.CreateText("SYSTEM READY", "Monospace", SuccessColor, 0.6f);
+    statusText.Position = center + new Vector2(0, 0);
+    statusText.Alignment = TextAlignment.CENTER;
+    frame.Add(statusText);
+}
+
+void DrawPhysicsAndStatus(MySpriteDrawFrame frame, Vector2 center)
+{
+    var statusPos = new Vector2(center.X, center.Y + 30);
+    
+    // Velocity
+    string velocityText = $"Velocity: {velocity.Length():F1} m/s";
+    var velocitySprite = MySprite.CreateText(velocityText, "Monospace", Color.White, 0.4f);
+    velocitySprite.Position = statusPos;
+    velocitySprite.Alignment = TextAlignment.CENTER;
+    frame.Add(velocitySprite);
+    statusPos.Y += 15;
+    
+    // Gyros status
+    bool gyrosOnline = allSmallGridGyros.Any(g => g.Enabled);
+    string gyrosText = gyrosOnline ? "ONLINE" : "OFFLINE";
+    Color gyrosColor = gyrosOnline ? SuccessColor : DangerColor;
+    
+    var gyrosLabel = MySprite.CreateText("Gyros: ", "Monospace", Color.White, 0.4f);
+    gyrosLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    gyrosLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(gyrosLabel);
+    
+    var gyrosStatus = MySprite.CreateText(gyrosText, "Monospace", gyrosColor, 0.4f);
+    gyrosStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    gyrosStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(gyrosStatus);
+    statusPos.Y += 15;
+    
+    // Thrusters status
+    bool thrustersOnline = allSmallGridThrusters.Any(t => t.Enabled);
+    string thrustersText = thrustersOnline ? "ONLINE" : "OFFLINE";
+    Color thrustersColor = thrustersOnline ? SuccessColor : DangerColor;
+    
+    var thrustersLabel = MySprite.CreateText("Thrusters: ", "Monospace", Color.White, 0.4f);
+    thrustersLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    thrustersLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(thrustersLabel);
+    
+    var thrustersStatus = MySprite.CreateText(thrustersText, "Monospace", thrustersColor, 0.4f);
+    thrustersStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    thrustersStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(thrustersStatus);
+    statusPos.Y += 15;
+    
+    // Guns status
+    bool gunsOnline = AreGunsOnline();
+    string gunsText = gunsOnline ? "ONLINE" : "OFFLINE";
+    Color gunsColor = gunsOnline ? SuccessColor : DangerColor;
+    
+    var gunsLabel = MySprite.CreateText("Guns: ", "Monospace", Color.White, 0.4f);
+    gunsLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    gunsLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(gunsLabel);
+    
+    var gunsStatus = MySprite.CreateText(gunsText, "Monospace", gunsColor, 0.4f);
+    gunsStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    gunsStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(gunsStatus);
+}
+
+void DrawTurretModeStatus(MySpriteDrawFrame frame, Vector2 center)
+{
+    var statusPos = new Vector2(center.X, center.Y + 30);
+    
+    // Gyros status
+    bool gyrosOnline = allSmallGridGyros.Any(g => g.Enabled);
+    string gyrosText = gyrosOnline ? "ONLINE" : "OFFLINE";
+    Color gyrosColor = gyrosOnline ? SuccessColor : DangerColor;
+    
+    var gyrosLabel = MySprite.CreateText("Gyros: ", "Monospace", Color.White, 0.4f);
+    gyrosLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    gyrosLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(gyrosLabel);
+    
+    var gyrosStatus = MySprite.CreateText(gyrosText, "Monospace", gyrosColor, 0.4f);
+    gyrosStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    gyrosStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(gyrosStatus);
+    statusPos.Y += 15;
+    
+    // Arena Rotor status
+    var arenaLabel = MySprite.CreateText("Arena Rotor: ", "Monospace", Color.White, 0.4f);
+    arenaLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    arenaLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(arenaLabel);
+    
+    var arenaStatus = MySprite.CreateText("ATTACHED", "Monospace", SuccessColor, 0.4f);
+    arenaStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    arenaStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(arenaStatus);
+    statusPos.Y += 15;
+    
+    // Guns status
+    bool gunsOnline = AreGunsOnline();
+    string gunsText = gunsOnline ? "ONLINE" : "OFFLINE";
+    Color gunsColor = gunsOnline ? SuccessColor : DangerColor;
+    
+    var gunsLabel = MySprite.CreateText("Guns: ", "Monospace", Color.White, 0.4f);
+    gunsLabel.Position = new Vector2(center.X - 40, statusPos.Y);
+    gunsLabel.Alignment = TextAlignment.LEFT;
+    frame.Add(gunsLabel);
+    
+    var gunsStatus = MySprite.CreateText(gunsText, "Monospace", gunsColor, 0.4f);
+    gunsStatus.Position = new Vector2(center.X + 40, statusPos.Y);
+    gunsStatus.Alignment = TextAlignment.RIGHT;
+    frame.Add(gunsStatus);
+}
+
+void DrawRightDisplay(IMyTextSurface surface, string currentTime)
+{
+    string mode = GetCurrentMode();
+    
+    if (mode == "CRANE MODE")
+    {
+        DrawCraneInfo(surface, currentTime);
+    }
+    else
+    {
+        DrawTurretInfo(surface, currentTime);
+    }
+}
+
+void DrawCraneInfo(IMyTextSurface surface, string currentTime)
 {
     using (var frame = surface.DrawFrame())
     {
         var viewport = surface.TextureSize;
-        var pos = STATUS_START_POSITION;
+        var pos = StatusStartPosition;
+        var fontSize = StatusFontSize;
         
-        // Title
-        AddText(frame, "COMBAT ANALYTICS", pos, ALERT_COLOR, STATUS_FONT_SIZE * 1.2f);
-        pos.Y += STATUS_LINE_SPACING * 2;
+        var title = MySprite.CreateText("GANTRY CRANE", "Monospace", WarningColor, fontSize * 1.2f);
+        title.Position = pos;
+        title.Alignment = TextAlignment.LEFT;
+        frame.Add(title);
+        pos.Y += StatusLineSpacing * 2;
         
-        // Session time
-        var sessionTime = DateTime.Now - analytics.SessionStart;
-        AddStatusLine(frame, "Session:", $"{sessionTime.TotalMinutes:F0}m", Color.White, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        bool craneAttached = gantryCraneRotor != null && gantryCraneRotor.IsAttached;
         
-        // Shots fired
-        AddStatusLine(frame, "Shots:", analytics.ShotsFired.ToString(), Color.White, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        var drillLabel = MySprite.CreateText("DRILL SYSTEMS:", "Monospace", Color.White, fontSize);
+        drillLabel.Position = pos;
+        drillLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(drillLabel);
         
-        // Targets engaged
-        AddStatusLine(frame, "Targets:", analytics.TargetsEngaged.ToString(), Color.White, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        string drillStatus = craneAttached ? "READY" : "OFFLINE";
+        Color drillColor = craneAttached ? SuccessColor : DangerColor;
         
-        // Average range
-        AddStatusLine(frame, "Avg Range:", $"{analytics.AverageEngagementRange:F0}m", Color.White, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING;
+        var drillStatusSprite = MySprite.CreateText(drillStatus, "Monospace", drillColor, fontSize);
+        drillStatusSprite.Position = new Vector2(viewport.X - 10, pos.Y);
+        drillStatusSprite.Alignment = TextAlignment.RIGHT;
+        frame.Add(drillStatusSprite);
+        pos.Y += StatusLineSpacing;
         
-        // Efficiency
-        float efficiency = analytics.ShotsFired > 0 ? (float)analytics.TargetsEngaged / analytics.ShotsFired * 100 : 0;
-        Color effColor = efficiency > 50 ? SUCCESS_COLOR : (efficiency > 25 ? WARNING_COLOR : DANGER_COLOR);
-        AddStatusLine(frame, "Efficiency:", $"{efficiency:F1}%", effColor, pos, viewport.X);
-        pos.Y += STATUS_LINE_SPACING * 2;
+        var craneLabel = MySprite.CreateText("CRANE SYSTEMS:", "Monospace", Color.White, fontSize);
+        craneLabel.Position = pos;
+        craneLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(craneLabel);
         
-        // Update time
-        AddStatusLine(frame, "Updated:", currentTime, Color.White, pos, viewport.X);
+        string craneStatus = craneAttached ? "READY" : "OFFLINE";
+        Color craneColor = craneAttached ? SuccessColor : DangerColor;
+        
+        var craneStatusSprite = MySprite.CreateText(craneStatus, "Monospace", craneColor, fontSize);
+        craneStatusSprite.Position = new Vector2(viewport.X - 10, pos.Y);
+        craneStatusSprite.Alignment = TextAlignment.RIGHT;
+        frame.Add(craneStatusSprite);
+        pos.Y += StatusLineSpacing * 2;
+        
+        var updateLabel = MySprite.CreateText("Last Update:", "Monospace", Color.White, fontSize * 0.9f);
+        updateLabel.Position = pos;
+        updateLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(updateLabel);
+        
+        var updateValue = MySprite.CreateText(currentTime, "Monospace", Color.White, fontSize * 0.9f);
+        updateValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        updateValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(updateValue);
     }
 }
 
-void AddText(MySpriteDrawFrame frame, string text, Vector2 position, Color color, float fontSize)
+void DrawTurretInfo(IMyTextSurface surface, string currentTime)
 {
-    var sprite = MySprite.CreateText(text, "Monospace", color, fontSize);
-    sprite.Position = position;
-    sprite.Alignment = TextAlignment.LEFT;
-    frame.Add(sprite);
+    using (var frame = surface.DrawFrame())
+    {
+        var viewport = surface.TextureSize;
+        var pos = StatusStartPosition;
+        var fontSize = StatusFontSize;
+        
+        var title = MySprite.CreateText("TURRET INFO", "Monospace", DangerColor, fontSize * 1.2f);
+        title.Position = pos;
+        title.Alignment = TextAlignment.LEFT;
+        frame.Add(title);
+        pos.Y += StatusLineSpacing * 2;
+        
+        var modeLabel = MySprite.CreateText("Mode:", "Monospace", Color.White, fontSize);
+        modeLabel.Position = pos;
+        modeLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(modeLabel);
+        
+        var modeValue = MySprite.CreateText(GetCurrentMode(), "Monospace", Color.White, fontSize);
+        modeValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        modeValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(modeValue);
+        pos.Y += StatusLineSpacing;
+        
+        var updateLabel = MySprite.CreateText("Last Update:", "Monospace", Color.White, fontSize * 0.9f);
+        updateLabel.Position = pos;
+        updateLabel.Alignment = TextAlignment.LEFT;
+        frame.Add(updateLabel);
+        
+        var updateValue = MySprite.CreateText(currentTime, "Monospace", Color.White, fontSize * 0.9f);
+        updateValue.Position = new Vector2(viewport.X - 10, pos.Y);
+        updateValue.Alignment = TextAlignment.RIGHT;
+        frame.Add(updateValue);
+    }
 }
 
-void AddStatusLine(MySpriteDrawFrame frame, string label, string value, Color valueColor, Vector2 position, float rightEdge)
+// ----------------- UTILITY FUNCTIONS -----------------
+string GetWeaponStatus()
 {
-    AddText(frame, label, position, Color.White, STATUS_FONT_SIZE);
+    if (gatlingGuns.Count == 0) return "NO GUNS";
     
-    var valueSprite = MySprite.CreateText(value, "Monospace", valueColor, STATUS_FONT_SIZE);
-    valueSprite.Position = new Vector2(rightEdge - 10, position.Y);
-    valueSprite.Alignment = TextAlignment.RIGHT;
-    frame.Add(valueSprite);
+    int validGuns = gatlingGuns.Count(gun => gun != null);
+    if (validGuns == 0) return "NO GUNS";
+    
+    int enabledGuns = gatlingGuns.Count(gun => gun != null && gun.Enabled);
+    if (enabledGuns == 0) return "OFFLINE";
+    
+    if (AreGunsFiring()) return "FIRING";
+    
+    return "READY";
+}
+
+Color GetWeaponStatusColor(string status)
+{
+    switch (status)
+    {
+        case "READY": return SuccessColor;
+        case "FIRING": return DangerColor;
+        case "OFFLINE":
+        case "NO GUNS": return DangerColor;
+        default: return Color.White;
+    }
 }
 
 void ClearAllDisplays()
 {
-    foreach (var display in blockCache.Displays.Values)
+    foreach (var display in displays.Values)
     {
         if (display != null)
         {
@@ -1134,102 +820,218 @@ void ClearAllDisplays()
     }
 }
 
-// Utility functions
-public bool AreGunsOnline() => blockCache.GatlingGuns.Any(gun => gun?.Enabled == true);
-public bool AreGunsFiring() => blockCache.GatlingGuns.Any(gun => gun?.IsShooting == true);
-
-public void SetGunsEnabled(bool enabled)
+void HandleTransferMode()
 {
-    foreach (var gun in blockCache.GatlingGuns)
-    {
-        if (gun != null) gun.Enabled = enabled;
-    }
-}
-
-public void SetGyrosEnabled(bool enabled)
-{
-    foreach (var gyro in blockCache.AllSmallGridGyros)
-    {
-        if (gyro != null) gyro.Enabled = enabled;
-    }
-}
-
-public void ConfigureForTransfer()
-{
-    if (blockCache.ArenaRotor != null)
+    transferModeOverride = true;
+    
+    if (arenaRotor != null)
     {
         try
         {
-            blockCache.ArenaRotor.Torque = TRANSFER_MODE_TORQUE;
-            blockCache.ArenaRotor.BrakingTorque = 0f;
-            blockCache.ArenaRotor.LowerLimitDeg = 0f;
-            blockCache.ArenaRotor.UpperLimitDeg = 180f;
-            blockCache.ArenaRotor.TargetVelocityRPM = TRANSFER_MODE_VELOCITY;
+            arenaRotor.Torque = 33600000f;
+            arenaRotor.BrakingTorque = 0f;
+            arenaRotor.LowerLimitDeg = 0f;
+            arenaRotor.UpperLimitDeg = 180f;
+            arenaRotor.TargetVelocityRPM = -2f;
+            Echo("Arena rotor configured for transfer mode");
         }
-        catch { }
+        catch (Exception e)
+        {
+            Echo($"Error configuring arena rotor: {e.Message}");
+        }
     }
-    
-    SetGyrosEnabled(false);
-    SetGunsEnabled(false);
-}
-
-public void RestoreFromTransfer()
-{
-    if (blockCache.ArenaRotor != null && savedSettings.ContainsKey("ArenaRotor"))
+    else
     {
-        RestoreRotorSettings(blockCache.ArenaRotor, "ArenaRotor");
+        Echo("Arena rotor not found for transfer mode");
     }
     
-    SetGyrosEnabled(true);
-    SetGunsEnabled(true);
-}
-
-void SaveRotorSettings(IMyMotorStator rotor, string key)
-{
-    if (rotor == null) return;
+    // Turn off small grid gyros
+    int gyrosDisabled = 0;
+    foreach (var gyro in allSmallGridGyros)
+    {
+        if (gyro != null)
+        {
+            gyro.Enabled = false;
+            gyrosDisabled++;
+        }
+    }
+    Echo($"Disabled {gyrosDisabled} small grid gyros");
     
-    var settings = $"T:{rotor.Torque}|BT:{rotor.BrakingTorque}|LL:{rotor.LowerLimitDeg}|UL:{rotor.UpperLimitDeg}|V:{rotor.TargetVelocityRPM}";
-    savedSettings[key] = settings;
-    rotor.CustomData = settings;
+    // Turn off all gatling guns
+    int gunsDisabled = 0;
+    foreach (var gun in gatlingGuns)
+    {
+        if (gun != null)
+        {
+            gun.Enabled = false;
+            gunsDisabled++;
+        }
+    }
+    Echo($"Disabled {gunsDisabled} gatling guns");
+    
+    Echo("Transfer mode activated successfully");
 }
 
-void RestoreRotorSettings(IMyMotorStator rotor, string key)
+void SaveArenaRotorSettings()
 {
-    if (rotor == null || !savedSettings.ContainsKey(key)) return;
+    if (arenaRotor == null) return;
     
     try
     {
-        var settings = savedSettings[key].Split('|');
+        // Only save if custom data is empty (first time detection)
+        if (string.IsNullOrEmpty(arenaRotor.CustomData))
+        {
+            var settings = $"Torque:{arenaRotor.Torque}|" +
+                          $"BrakingTorque:{arenaRotor.BrakingTorque}|" +
+                          $"LowerLimit:{arenaRotor.LowerLimitDeg}|" +
+                          $"UpperLimit:{arenaRotor.UpperLimitDeg}|" +
+                          $"Velocity:{arenaRotor.TargetVelocityRPM}";
+            
+            arenaRotor.CustomData = settings;
+            Echo($"Arena Rotor settings saved: {settings}");
+        }
+        else
+        {
+            Echo("Arena Rotor settings already saved in custom data");
+        }
+    }
+    catch (Exception e)
+    {
+        Echo($"Error saving Arena Rotor settings: {e.Message}");
+    }
+}
+
+void HandleStopTransferMode()
+{
+    Echo("Processing stop_transfer command...");
+    transferModeOverride = false;
+    
+    if (arenaRotor != null)
+    {
+        try
+        {
+            Echo("Attempting to restore Arena Rotor settings...");
+            RestoreArenaRotorSettings();
+        }
+        catch (Exception e)
+        {
+            Echo($"Error restoring arena rotor: {e.Message}");
+        }
+    }
+    else
+    {
+        Echo("Arena rotor not found for stop transfer");
+    }
+    
+    // Re-enable small grid gyros
+    int gyrosEnabled = 0;
+    foreach (var gyro in allSmallGridGyros)
+    {
+        if (gyro != null)
+        {
+            gyro.Enabled = true;
+            gyrosEnabled++;
+        }
+    }
+    Echo($"Re-enabled {gyrosEnabled} small grid gyros");
+    
+    // Re-enable all gatling guns
+    int gunsEnabled = 0;
+    foreach (var gun in gatlingGuns)
+    {
+        if (gun != null)
+        {
+            gun.Enabled = true;
+            gunsEnabled++;
+        }
+    }
+    Echo($"Re-enabled {gunsEnabled} gatling guns");
+    
+    Echo("Transfer mode stopped - all settings and systems restored");
+}
+
+void RestoreArenaRotorSettings()
+{
+    if (arenaRotor == null)
+    {
+        Echo("Arena rotor is null - cannot restore settings");
+        return;
+    }
+    
+    if (string.IsNullOrEmpty(arenaRotor.CustomData))
+    {
+        Echo("No saved Arena Rotor settings found in custom data");
+        return;
+    }
+    
+    Echo($"Restoring from custom data: {arenaRotor.CustomData}");
+    
+    try
+    {
+        var settings = arenaRotor.CustomData.Split('|');
+        
         foreach (var setting in settings)
         {
             var parts = setting.Split(':');
-            if (parts.Length != 2) continue;
-            
-            float value;
-            if (!float.TryParse(parts[1], out value)) continue;
-            
-            switch (parts[0])
+            if (parts.Length == 2)
             {
-                case "T": rotor.Torque = value; break;
-                case "BT": rotor.BrakingTorque = value; break;
-                case "LL": rotor.LowerLimitDeg = value; break;
-                case "UL": rotor.UpperLimitDeg = value; break;
-                case "V": rotor.TargetVelocityRPM = value; break;
+                var key = parts[0];
+                var value = parts[1];
+                
+                Echo($"Restoring {key} = {value}");
+                
+                switch (key)
+                {
+                    case "Torque":
+                        arenaRotor.Torque = float.Parse(value);
+                        Echo($"Set Torque to {arenaRotor.Torque}");
+                        break;
+                    case "BrakingTorque":
+                        arenaRotor.BrakingTorque = float.Parse(value);
+                        Echo($"Set BrakingTorque to {arenaRotor.BrakingTorque}");
+                        break;
+                    case "LowerLimit":
+                        arenaRotor.LowerLimitDeg = float.Parse(value);
+                        Echo($"Set LowerLimit to {arenaRotor.LowerLimitDeg}");
+                        break;
+                    case "UpperLimit":
+                        arenaRotor.UpperLimitDeg = float.Parse(value);
+                        Echo($"Set UpperLimit to {arenaRotor.UpperLimitDeg}");
+                        break;
+                    case "Velocity":
+                        arenaRotor.TargetVelocityRPM = float.Parse(value);
+                        Echo($"Set Velocity to {arenaRotor.TargetVelocityRPM}");
+                        break;
+                    default:
+                        Echo($"Unknown setting key: {key}");
+                        break;
+                }
+            }
+            else
+            {
+                Echo($"Invalid setting format: {setting}");
             }
         }
+        
+        Echo("Arena Rotor settings restoration completed");
     }
-    catch { }
+    catch (Exception e)
+    {
+        Echo($"Error parsing saved settings: {e.Message}");
+        Echo($"Raw custom data: '{arenaRotor.CustomData}'");
+    }
 }
 
 void UpdateStatus()
 {
-    Echo("=== ADAPTIVE TURRET v2.0 ===");
+    Echo("=== ADAPTIVE TURRET SYSTEM ===");
     Echo($"Status: {(systemActive ? "ACTIVE" : "INACTIVE")}");
     if (systemActive)
     {
-        Echo($"Mode: {currentMode?.Name ?? "NONE"}");
-        Echo($"Power: {(blockCache.Battery != null ? $"{(blockCache.Battery.CurrentStoredPower / blockCache.Battery.MaxStoredPower * 100):F0}%" : "N/A")}");
-        Echo($"Threats: {threatAnalyzer.GetThreatsInRange(MAX_TARGETING_RANGE).Count}");
-        Echo($"Performance: {Runtime.CurrentInstructionCount}/{Runtime.MaxInstructionCount}");
+        Echo($"Mode: {GetCurrentMode()}");
+        Echo($"Displays: {displays.Count} connected");
+        Echo($"Guns: {gatlingGuns.Count} found");
+        Echo($"Small Grid Gyros: {allSmallGridGyros.Count}");
+        Echo($"Small Grid Thrusters: {allSmallGridThrusters.Count}");
     }
 }
